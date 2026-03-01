@@ -1,0 +1,55 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'pyproject.toml'
+      - 'requirements*.txt'
+      - '.github/workflows/build.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'pyproject.toml'
+      - 'requirements*.txt'
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Install project dependencies
+      run: pip install -e ".[dev]"
+
+    - name: Build distribution
+      run: python -m build
+
+    - name: Verify wheel
+      run: |
+        twine check dist/*
+        pip install dist/*.whl
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      if: matrix.python-version == '3.12'
+      with:
+        name: distribution-packages
+        path: dist/

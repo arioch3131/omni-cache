@@ -1,0 +1,72 @@
+# pre-commit configuration for adaptive-memory-pool
+# Installs all code quality hooks
+
+repos:
+  # Basic file hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # Ruff - Formatting + linting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.13
+    hooks:
+      - id: ruff-format
+        name: ruff-format
+      - id: ruff
+        name: ruff-check
+        args: ["--fix"]
+
+  # MyPy - Type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.17.1
+    hooks:
+      - id: mypy
+        name: mypy
+        args: ["--config-file", "pyproject.toml"]
+        pass_filenames: false
+        entry: mypy src/
+        additional_dependencies: [
+          # Main project dependencies
+          "Pillow>=9.0.0",
+          "PyQt6>=6.0.0",
+          "numpy>=1.20.0",
+          "SQLAlchemy>=1.4.0",
+          # Example dependencies
+          "uvicorn>=0.33.0",
+          "fastapi>=0.116.1",
+          "Flask>=3.0.0",
+          "psutil>=7.0.0",
+          "requests>=2.0.0",
+          # Specific types if necessary
+          "types-requests",
+        ]
+
+# Stage configuration
+default_stages: [pre-commit]
+fail_fast: false  # Continue even if a hook fails to see all problems
+
+# Global exclusions
+exclude: |
+  (?x)^(
+    docs/.*|
+    build/.*|
+    dist/.*|
+    \.eggs/.*|
+    .*\.egg-info/.*|
+    __pycache__/.*|
+    \.git/.*|
+    \.mypy_cache/.*|
+    \.pytest_cache/.*|
+    \.coverage.*
+  )$

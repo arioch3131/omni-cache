@@ -1,0 +1,57 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'examples/**'
+      - 'pyproject.toml'
+      - 'requirements*.txt'
+      - '.github/workflows/security.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'examples/**'
+      - 'pyproject.toml'
+      - 'requirements*.txt'
+      - '.github/workflows/security.yml'
+  schedule:
+    - cron: '0 2 * * 1'  # Every Monday at 2am (keeps the scan periodic)
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+
+    - name: Install security tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install ruff safety
+        pip install -e ".[all]"
+
+    - name: Run Ruff security scan on Source
+      run: |
+        ruff check --select S --output-format json src/ > ruff-security-src.json || true
+        ruff check --select S src/
+
+    - name: Run Ruff security scan on Examples
+      run: |
+        ruff check --select S --output-format json examples/ > ruff-security-examples.json || true
+        ruff check --select S examples/
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-reports
+        path: |
+          ruff-security-src.json
+          ruff-security-examples.json

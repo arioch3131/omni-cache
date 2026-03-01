@@ -1,0 +1,214 @@
+# Suggestions d'améliorations pour pyproject.toml
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "omni_cache"
+version = "1.0.0"
+description = "A highly modular and extensible generic memory pool for efficient object reuse"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Arioch", email = "arioch31@gmail.com"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+]
+keywords = ["memory", "pool", "cache", "object-reuse", "performance"]
+requires-python = ">=3.11"
+
+dependencies = []
+
+[project.optional-dependencies]
+# Backend dependencies
+redis = ["redis>=4.0.0"]
+memcached = ["pymemcache>=3.0.0"]
+smartpool = ["smartpool @ git+https://github.com/arioch3131/smartpool.git@1.0.0"]
+
+# Feature groups
+async = ["redis>=4.0.0"]
+monitoring = ["prometheus-client>=0.14.0", "structlog>=22.0.0"]
+serialization = ["msgpack>=1.0.0", "orjson>=3.0.0"]
+
+# Development dependencies
+security = ["ruff>=0.11.0"]
+quality = ["pre-commit>=3.0.0", "commitizen>=3.0.0"]
+docs = [
+    "sphinx>=4.0.0",
+    "sphinx-rtd-theme>=1.0.0",
+    "sphinx-autodoc-typehints>=1.12.0",
+    "myst-parser>=0.17.0"
+]
+
+dev = [
+    # Testing
+    "pytest>=6.0.0",
+    "pytest-cov>=3.0.0",
+    "pytest-xdist>=3.0.0",
+    "pytest-mock>=3.0.0",
+    "pytest-benchmark>=4.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-timeout>=2.1.0",
+    "psutil>=5.9.0",
+    "pymemcache>=3.0.0",
+    
+    # Code quality
+    "ruff>=0.11.0",
+    "mypy>=1.0.0",
+    
+    # Security
+    "safety>=2.0.0",
+    
+    # Tools
+    "pre-commit>=3.0.0",
+    "tox>=4.0.0",
+]
+
+# Convenience groups
+all = [
+    "redis>=4.0.0",
+    "pymemcache>=3.0.0", 
+    "smartpool @ git+https://github.com/arioch3131/smartpool.git@1.0.0",
+    "aioredis>=2.0.0",
+    "prometheus-client>=0.14.0",
+    "msgpack>=1.0.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/arioch3131/omni-cache"
+Documentation = "https://omni-cache.readthedocs.io"
+Repository = "https://github.com/arioch3131/omni-cache.git"
+Issues = "https://github.com/arioch3131/omni-cache/issues"
+Changelog = "https://github.com/arioch3131/omni-cache/blob/main/CHANGELOG.md"
+
+# Entry points for CLI tools
+[project.scripts]
+omni-cache = "omni_cache:info"
+
+[project.entry-points."omni_cache.adapters"]
+memory = "omni_cache.adapters.memory:MemoryAdapter"
+redis = "omni_cache.adapters.redis:RedisAdapter"
+memcached = "omni_cache.adapters.memcached:MemcachedAdapter"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/omni_cache"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+# Configuration plus robuste pour les outils
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    ".eggs",
+    ".git",
+    ".mypy_cache",
+    ".nox",
+    ".tox",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/**/*.py" = ["S101", "S105", "S110", "S311"]
+"tests/**/*.py" = ["S101", "S311"]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+packages = ["omni_cache"]
+explicit_package_bases = true
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_unreachable = true
+strict_equality = true
+show_error_codes = true
+
+# Ignore les imports manquants pour les dépendances optionnelles
+[[tool.mypy.overrides]]
+module = [
+    "redis.*",
+    "pymemcache.*",
+    "smartpool.*",
+    "prometheus_client.*"
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+pythonpath = ["src"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--cov=omni_cache",
+    "--cov-report=html",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+    "--cov-fail-under=90",
+    "--cov-branch",
+    "--import-mode=importlib",
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+  #  "--strict-config"
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+    "redis: marks tests requiring Redis",
+    "asyncio: marks async tests",
+    "compatibility: marks compatibility tests"
+]
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/site-packages/*",
+    "*/examples/*"
+]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+    "pass",
+    "\\.\\.\\."
+]
+precision = 2
+show_missing = true

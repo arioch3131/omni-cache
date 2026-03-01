@@ -1,0 +1,2 @@
+# This file ensures the _templates directory is created for Sphinx
+# You can add custom templates here to override Sphinx themes
