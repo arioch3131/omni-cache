@@ -69,7 +69,7 @@ class TestSmartPoolAdapterFactory:
         assert metadata.backend == CacheBackend.SMARTPOOL.value
         assert metadata.factory_class == "SmartPoolAdapterFactory"
         assert metadata.description == "Factory for SmartPool adapters"
-        assert metadata.version == "1.0.0"
+        assert metadata.version == "1.1.0"
         assert "smartpool" in metadata.dependencies
         assert "pool" in metadata.adapter_types
 
@@ -96,7 +96,7 @@ class TestSmartPoolAdapterFactory:
         assert properties["shrink_threshold"]["default"] == 0.5
 
         # Test constraints
-        assert properties["initial_size"]["minimum"] == 1
+        assert properties["initial_size"]["minimum"] == 0
         assert properties["max_size"]["minimum"] == 1
         assert properties["min_size"]["minimum"] == 0
         assert properties["growth_factor"]["minimum"] == 1.0
@@ -122,6 +122,24 @@ class TestSmartPoolAdapterFactory:
     @pytest.mark.parametrize(
         "value,expected",
         [
+            (0, True),
+            (1, True),
+            (5, True),
+            (100, True),
+            (-1, False),
+            (1.5, False),
+            ("5", False),
+            (None, False),
+        ],
+    )
+    def test_non_negative_initial_size_validator(self, factory, value, expected):
+        """Test non-negative integer validator for initial_size."""
+        validator = factory._config_validators["initial_size"]
+        assert validator(value) == expected
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
             (1, True),
             (5, True),
             (100, True),
@@ -132,9 +150,9 @@ class TestSmartPoolAdapterFactory:
             (None, False),
         ],
     )
-    def test_positive_integer_validator(self, factory, value, expected):
-        """Test positive integer validator for initial_size and max_size."""
-        validator = factory._config_validators["initial_size"]
+    def test_positive_max_size_validator(self, factory, value, expected):
+        """Test positive integer validator for max_size."""
+        validator = factory._config_validators["max_size"]
         assert validator(value) == expected
 
     @pytest.mark.parametrize(
@@ -217,6 +235,17 @@ class TestSmartPoolAdapterFactory:
             # Only required field, others should use defaults
         }
         # Should not raise exception - uses defaults for size validation
+        factory._validate_config(config)
+
+    def test_validate_config_accepts_zero_initial_size(self, factory, mock_factory_function):
+        """Test that zero initial_size is allowed for lazily populated pools."""
+        config = {
+            "factory_function": mock_factory_function,
+            "initial_size": 0,
+            "max_size": 20,
+            "min_size": 0,
+        }
+
         factory._validate_config(config)
 
     @patch("omni_cache.adapters.smartpool.factory.SMARTPOOL_ADAPTER_AVAILABLE", True)

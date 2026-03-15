@@ -38,14 +38,14 @@ class SmartPoolAdapterFactory(AbstractFactory):
             backend=CacheBackend.SMARTPOOL,
             factory_class="SmartPoolAdapterFactory",
             description="Factory for SmartPool adapters",  # Correction: SmartPool avec majuscule
-            version="1.0.0",
+            version="1.1.0",
             dependencies=["smartpool"],
             adapter_types=["pool"],
             config_schema={
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "default": "adaptive"},
-                    "initial_size": {"type": "integer", "minimum": 1, "default": 5},
+                    "initial_size": {"type": "integer", "minimum": 0, "default": 5},
                     "max_size": {"type": "integer", "minimum": 1, "default": 20},
                     "min_size": {"type": "integer", "minimum": 0, "default": 2},
                     "growth_factor": {"type": "number", "minimum": 1.0, "default": 1.5},
@@ -73,7 +73,7 @@ class SmartPoolAdapterFactory(AbstractFactory):
         def validate_callable(value: Any) -> bool:
             return callable(value)
 
-        self.add_config_validator("initial_size", validate_positive_integer)
+        self.add_config_validator("initial_size", validate_non_negative_integer)
         self.add_config_validator("max_size", validate_positive_integer)
         self.add_config_validator("min_size", validate_non_negative_integer)
         self.add_config_validator("factory_function", validate_callable)

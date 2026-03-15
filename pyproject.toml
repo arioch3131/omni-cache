@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omni_cache"
-version = "1.0.0"
+version = "1.1.0"
 description = "A highly modular and extensible generic memory pool for efficient object reuse"
 readme = "README.md"
 license = {text = "MIT"}
