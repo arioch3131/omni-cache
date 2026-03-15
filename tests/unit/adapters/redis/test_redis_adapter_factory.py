@@ -75,7 +75,7 @@ class TestRedisAdapterFactory:
         assert metadata.backend == CacheBackend.REDIS.value
         assert metadata.factory_class == "RedisAdapterFactory"
         assert metadata.description == "Factory for Redis cache adapters"
-        assert metadata.version == "1.0.0"
+        assert metadata.version == "1.1.0"
         assert "redis" in metadata.dependencies
         assert "cache" in metadata.adapter_types
 
