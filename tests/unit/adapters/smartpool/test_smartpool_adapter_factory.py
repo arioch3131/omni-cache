@@ -237,9 +237,7 @@ class TestSmartPoolAdapterFactory:
         # Should not raise exception - uses defaults for size validation
         factory._validate_config(config)
 
-    def test_validate_config_accepts_zero_initial_size(
-        self, factory, mock_factory_function
-    ):
+    def test_validate_config_accepts_zero_initial_size(self, factory, mock_factory_function):
         """Test that zero initial_size is allowed for lazily populated pools."""
         config = {
             "factory_function": mock_factory_function,
