@@ -20,6 +20,9 @@ on:
   schedule:
     - cron: '0 2 * * 1'  # Every Monday at 2am (keeps the scan periodic)
 
+permissions:
+  contents: read
+
 jobs:
   security:
     runs-on: ubuntu-latest

@@ -9,7 +9,8 @@ import logging
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, TypeVar, cast
+from dataclasses import dataclass
+from typing import Any, TypeVar
 
 from omni_cache.core.adapter_registry import AdapterRegistry, ManagerConfig
 from omni_cache.core.exceptions import AdapterNotFoundError
@@ -31,6 +32,24 @@ from omni_cache.core.routing import CacheRouter
 # Type variables
 K = TypeVar("K")
 V = TypeVar("V")
+
+
+@dataclass
+class _LocalStats:
+    """Thread-local stats buffer for low-contention global aggregation."""
+
+    hits: int = 0
+    misses: int = 0
+    sets: int = 0
+    deletes: int = 0
+    pool_borrowed: int = 0
+    pool_returned: int = 0
+    pending_ops: int = 0
+    get_counter: int = 0
+    set_counter: int = 0
+    delete_counter: int = 0
+    pool_get_counter: int = 0
+    pool_put_counter: int = 0
 
 
 # pylint: disable=too-many-public-methods,protected-access
@@ -69,13 +88,22 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
             "cache": CacheStats(),
             "pool": PoolStats(),
         }
+        self._enable_global_stats = self._config.enable_global_stats
+        self._default_cache_adapter_ref: KeyValueInterface | None = None
         self._stats_lock = threading.RLock()
+        self._global_stats_sample_rate = 1
+        self._global_stats_flush_every = 64
+        self._stats_local = threading.local()
+        self._thread_registry_lock = threading.RLock()
+        self._thread_locals: list[_LocalStats] = []
+        self._refresh_stats_sampling_config()
 
         # Health monitoring
         self._health_monitor = HealthMonitor(self._config, self._registry, self._logger)
 
         # Routing
         self._router = CacheRouter(self._config, self._registry, self._logger)
+        self._adapter_cache = self._router._cache_adapter_cache
 
         self._logger.info("CacheManager initialized")
 
@@ -145,10 +173,16 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
 
             # Register in registry
             self._registry.register(name, adapter, config)
+            if isinstance(adapter, KeyValueInterface):
+                self._router.register_cache_adapter(name, adapter)
+            else:
+                self._router.invalidate_cache_adapter(name)
 
             # Set as default if none set
             if self._config.default_adapter is None:
                 self._config.default_adapter = name
+            if isinstance(adapter, KeyValueInterface) and self._config.default_adapter == name:
+                self._default_cache_adapter_ref = adapter
 
             # Start health monitoring if this is the first adapter
             if len(self._registry.list_all()) == 1:
@@ -204,11 +238,18 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
 
                 # Remove from registry
                 self._registry.unregister(name)
+                self._router.invalidate_cache_adapter(name)
 
                 # Update default if removed
                 if self._config.default_adapter == name:
                     remaining = self._registry.list_all()
                     self._config.default_adapter = remaining[0] if remaining else None
+                    if self._config.default_adapter is not None:
+                        self._default_cache_adapter_ref = self._router.get_cached_cache_adapter(
+                            self._config.default_adapter
+                        )
+                    else:
+                        self._default_cache_adapter_ref = None
 
                 # Stop health monitoring if no adapters left
                 if not self._registry.list_all():
@@ -265,6 +306,18 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
         """Get a cache adapter with routing and fallback."""
         return self._router.get_cache_adapter(key, adapter_name)
 
+    def _resolve_cache_adapter(self, key: K, adapter: str | None) -> KeyValueInterface:
+        """Resolve cache adapter with fast paths for common runtime cases."""
+        if adapter is not None:
+            cached = self._router.get_cached_cache_adapter(adapter)
+            if cached is not None:
+                return cached
+            return self._get_cache_adapter(key, adapter)
+
+        if self._default_cache_adapter_ref is not None and not self._router.has_routing_rules():
+            return self._default_cache_adapter_ref
+        return self._get_cache_adapter(key, None)
+
     def _get_pool_adapter(self, adapter_name: str | None = None) -> PoolInterface:
         """Get a pool adapter with fallback."""
         return self._router.get_pool_adapter(adapter_name)
@@ -283,22 +336,181 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
         except Exception:  # pylint: disable=broad-exception-caught
             return False
 
+    def _refresh_stats_sampling_config(self) -> None:
+        """Refresh stats sampling runtime configuration."""
+        raw_rate = self._config.extra_config.get("global_stats_sample_rate", 1)
+        try:
+            rate = int(raw_rate)
+        except Exception:  # pylint: disable=broad-exception-caught
+            rate = 1
+        self._global_stats_sample_rate = max(1, rate)
+
+        raw_flush = self._config.extra_config.get("global_stats_flush_every", 64)
+        try:
+            flush_every = int(raw_flush)
+        except Exception:  # pylint: disable=broad-exception-caught
+            flush_every = 64
+        self._global_stats_flush_every = max(1, flush_every)
+
+    def _sampled_step_local(self, local: _LocalStats, counter_attr: str) -> int:
+        """
+        Return sample step for a thread-local counter.
+
+        - 0 => skip this operation (not sampled)
+        - N => apply +N to preserve approximate totals
+        """
+        if self._global_stats_sample_rate <= 1:
+            return 1
+        counter = getattr(local, counter_attr) + 1
+        setattr(local, counter_attr, counter)
+        if counter % self._global_stats_sample_rate == 0:
+            return self._global_stats_sample_rate
+        return 0
+
+    def _get_local_stats(self) -> _LocalStats:
+        """Return the current thread stats buffer."""
+        local = getattr(self._stats_local, "stats", None)
+        if local is None:
+            local = _LocalStats()
+            self._stats_local.stats = local
+            with self._thread_registry_lock:
+                self._thread_locals.append(local)
+        return local
+
+    def _reset_local_stats(self, local: _LocalStats) -> None:
+        """Reset a local stats buffer including sampling counters."""
+        local.hits = 0
+        local.misses = 0
+        local.sets = 0
+        local.deletes = 0
+        local.pool_borrowed = 0
+        local.pool_returned = 0
+        local.pending_ops = 0
+        local.get_counter = 0
+        local.set_counter = 0
+        local.delete_counter = 0
+        local.pool_get_counter = 0
+        local.pool_put_counter = 0
+
+    def _flush_local_stats(self, local: _LocalStats) -> None:
+        """Flush a thread-local stats buffer into global stats."""
+        if (
+            local.hits == 0
+            and local.misses == 0
+            and local.sets == 0
+            and local.deletes == 0
+            and local.pool_borrowed == 0
+            and local.pool_returned == 0
+        ):
+            local.pending_ops = 0
+            return
+
+        with self._stats_lock:
+            cache_stats = self._cache_stats_ref()
+            cache_stats.hits += local.hits
+            cache_stats.misses += local.misses
+            cache_stats.sets += local.sets
+            cache_stats.deletes += local.deletes
+
+            pool_stats = self._pool_stats_ref()
+            pool_stats.borrowed += local.pool_borrowed
+            pool_stats.returned += local.pool_returned
+
+        local.hits = 0
+        local.misses = 0
+        local.sets = 0
+        local.deletes = 0
+        local.pool_borrowed = 0
+        local.pool_returned = 0
+        local.pending_ops = 0
+
+    def _maybe_flush_local_stats(self, local: _LocalStats) -> None:
+        """Flush local stats periodically to cap drift with low contention."""
+        local.pending_ops += 1
+        if local.pending_ops >= self._global_stats_flush_every:
+            self._flush_local_stats(local)
+
+    def _flush_all_local_stats(self) -> None:
+        """Flush all known local buffers to global stats."""
+        with self._thread_registry_lock:
+            buffers = list(self._thread_locals)
+        for local in buffers:
+            self._flush_local_stats(local)
+
+    def _reset_all_local_stats(self) -> None:
+        """Reset all known local buffers."""
+        with self._thread_registry_lock:
+            buffers = list(self._thread_locals)
+        for local in buffers:
+            self._reset_local_stats(local)
+
+    def _cache_stats_ref(self) -> CacheStats:
+        """Typed accessor for cache global stats."""
+        stats = self._global_stats["cache"]
+        if not isinstance(stats, CacheStats):
+            raise TypeError("Invalid cache stats object")
+        return stats
+
+    def _pool_stats_ref(self) -> PoolStats:
+        """Typed accessor for pool global stats."""
+        stats = self._global_stats["pool"]
+        if not isinstance(stats, PoolStats):
+            raise TypeError("Invalid pool stats object")
+        return stats
+
     # KeyValueInterface implementation (with routing)
     def get(self, key: K, default: V | None = None, adapter: str | None = None) -> V | None:
         """Get value from cache with automatic adapter routing."""
         try:
-            cache_adapter = self._get_cache_adapter(key, adapter)
+            if adapter is None:
+                if self._default_cache_adapter_ref is not None and not self._router._routing_rules:
+                    cache_adapter = self._default_cache_adapter_ref
+                else:
+                    cache_adapter = self._get_cache_adapter(key, None)
+            else:
+                cached_adapter = self._adapter_cache.get(adapter)
+                if cached_adapter is None:
+                    cache_adapter = self._get_cache_adapter(key, adapter)
+                else:
+                    cache_adapter = cached_adapter
             result = cache_adapter.get(key, default)
 
             # Update global stats
-            if self._config.enable_global_stats:
-                with self._stats_lock:
-                    cache_stats = cast(CacheStats, self._global_stats["cache"])
-                    if result is not None and not self._safe_values_equal(result, default):
-                        cache_stats.hits += 1
+            if self._enable_global_stats:
+                try:
+                    local_stats = self._stats_local.stats
+                except AttributeError:
+                    local_stats = _LocalStats()
+                    self._stats_local.stats = local_stats
+                    with self._thread_registry_lock:
+                        self._thread_locals.append(local_stats)
+
+                sample_rate = self._global_stats_sample_rate
+                if sample_rate <= 1:
+                    step = 1
+                else:
+                    counter = local_stats.get_counter + 1
+                    if counter >= sample_rate:
+                        local_stats.get_counter = 0
+                        step = sample_rate
                     else:
-                        cache_stats.misses += 1
-                    cache_stats.update_hit_rate()
+                        local_stats.get_counter = counter
+                        step = 0
+
+                if step:
+                    is_hit = (
+                        result is not None
+                        if default is None
+                        else (result is not None and not self._safe_values_equal(result, default))
+                    )
+                    if is_hit:
+                        local_stats.hits += step
+                    else:
+                        local_stats.misses += step
+
+                local_stats.pending_ops += 1
+                if local_stats.pending_ops >= self._global_stats_flush_every:
+                    self._flush_local_stats(local_stats)
 
             return result
 
@@ -315,13 +527,47 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
     ) -> bool:
         """Set value in cache with automatic adapter routing."""
         try:
-            cache_adapter = self._get_cache_adapter(key, adapter)
+            if adapter is None:
+                if self._default_cache_adapter_ref is not None and not self._router._routing_rules:
+                    cache_adapter = self._default_cache_adapter_ref
+                else:
+                    cache_adapter = self._get_cache_adapter(key, None)
+            else:
+                cached_adapter = self._adapter_cache.get(adapter)
+                if cached_adapter is None:
+                    cache_adapter = self._get_cache_adapter(key, adapter)
+                else:
+                    cache_adapter = cached_adapter
             success = cache_adapter.set(key, value, ttl)
 
             # Update global stats
-            if self._config.enable_global_stats and success:
-                with self._stats_lock:
-                    cast(CacheStats, self._global_stats["cache"]).sets += 1
+            if self._enable_global_stats and success:
+                try:
+                    local_stats = self._stats_local.stats
+                except AttributeError:
+                    local_stats = _LocalStats()
+                    self._stats_local.stats = local_stats
+                    with self._thread_registry_lock:
+                        self._thread_locals.append(local_stats)
+
+                sample_rate = self._global_stats_sample_rate
+                if sample_rate <= 1:
+                    step = 1
+                else:
+                    counter = local_stats.set_counter + 1
+                    if counter >= sample_rate:
+                        local_stats.set_counter = 0
+                        step = sample_rate
+                    else:
+                        local_stats.set_counter = counter
+                        step = 0
+
+                if step:
+                    local_stats.sets += step
+
+                local_stats.pending_ops += 1
+                if local_stats.pending_ops >= self._global_stats_flush_every:
+                    self._flush_local_stats(local_stats)
 
             return success
 
@@ -332,13 +578,16 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
     def delete(self, key: K, adapter: str | None = None) -> bool:
         """Delete key from cache with automatic adapter routing."""
         try:
-            cache_adapter = self._get_cache_adapter(key, adapter)
+            cache_adapter = self._resolve_cache_adapter(key, adapter)
             success = cache_adapter.delete(key)
 
             # Update global stats
-            if self._config.enable_global_stats and success:
-                with self._stats_lock:
-                    cast(CacheStats, self._global_stats["cache"]).deletes += 1
+            if self._enable_global_stats and success:
+                local_stats = self._get_local_stats()
+                step = self._sampled_step_local(local_stats, "delete_counter")
+                if step:
+                    local_stats.deletes += step
+                self._maybe_flush_local_stats(local_stats)
 
             return success
 
@@ -423,15 +672,19 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
         """Get object from pool."""
         try:
             pool_adapter = self._get_pool_adapter(adapter)
-            if hasattr(pool_adapter, "_get_pool_object"):
-                result = cast(Any | None, cast(Any, pool_adapter)._get_pool_object(timeout))
+            get_pool_object = getattr(pool_adapter, "_get_pool_object", None)
+            if callable(get_pool_object):
+                result = get_pool_object(timeout)
             else:
                 result = pool_adapter.get(timeout)
 
             # Update global stats
-            if self._config.enable_global_stats:
-                with self._stats_lock:
-                    cast(PoolStats, self._global_stats["pool"]).borrowed += 1
+            if self._enable_global_stats:
+                local_stats = self._get_local_stats()
+                step = self._sampled_step_local(local_stats, "pool_get_counter")
+                if step:
+                    local_stats.pool_borrowed += step
+                self._maybe_flush_local_stats(local_stats)
 
             return result
 
@@ -446,9 +699,12 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
             success = pool_adapter.put(obj, timeout)
 
             # Update global stats
-            if self._config.enable_global_stats and success:
-                with self._stats_lock:
-                    cast(PoolStats, self._global_stats["pool"]).returned += 1
+            if self._enable_global_stats and success:
+                local_stats = self._get_local_stats()
+                step = self._sampled_step_local(local_stats, "pool_put_counter")
+                if step:
+                    local_stats.pool_returned += step
+                self._maybe_flush_local_stats(local_stats)
 
             return success
 
@@ -472,11 +728,10 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
         obj = self.get_object_pool(timeout, adapter)
         if obj is None:
             raise RuntimeError("No object available from pool")
-        borrowed_obj = cast(Any, obj)
         try:
-            yield borrowed_obj
+            yield obj
         finally:
-            self.put(borrowed_obj, adapter=adapter)
+            self.put(obj, adapter=adapter)
 
     # Health monitoring
     def _start_health_monitoring(self) -> None:
@@ -490,7 +745,9 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
     # Statistics and monitoring
     def get_global_stats(self) -> dict[str, CacheStats | PoolStats]:
         """Get global statistics across all adapters."""
+        self._flush_all_local_stats()
         with self._stats_lock:
+            self._cache_stats_ref().update_hit_rate()
             return {"cache": self._global_stats["cache"], "pool": self._global_stats["pool"]}
 
     def get_adapter_stats(self, name: str | None = None) -> dict[str, Any]:
@@ -507,6 +764,7 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
     def reset_global_stats(self) -> bool:
         """Reset global statistics."""
         try:
+            self._reset_all_local_stats()
             with self._stats_lock:
                 self._global_stats["cache"] = CacheStats()
                 self._global_stats["pool"] = PoolStats()
@@ -524,12 +782,20 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
                     setattr(self._config, key, value)
                 else:
                     self._config.extra_config[key] = value
+            self._enable_global_stats = self._config.enable_global_stats
+            if self._config.default_adapter is not None:
+                self._default_cache_adapter_ref = self._router.get_cached_cache_adapter(
+                    self._config.default_adapter
+                )
+            else:
+                self._default_cache_adapter_ref = None
 
             # Reconfigure logger if level changed
             if "log_level" in config:
                 self._logger.setLevel(
                     getattr(logging, self._config.log_level.upper(), logging.INFO)
                 )
+            self._refresh_stats_sampling_config()
 
             self._logger.info("Manager configuration updated")
             return True
@@ -574,6 +840,8 @@ class CacheManager(ManagerInterface, KeyValueInterface[K, V], Configurable):
                     except Exception as e:  # pylint: disable=broad-exception-caught
                         self._logger.warning("Error disconnecting adapter %s: %s", name, e)
 
+            self._router.invalidate_cache_adapter()
+            self._default_cache_adapter_ref = None
             self._logger.info("Disconnected all adapters")
         except Exception as e:  # pylint: disable=broad-exception-caught
             self._logger.error("Error during cleanup: %s", e)

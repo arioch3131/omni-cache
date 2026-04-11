@@ -77,7 +77,7 @@ __all__ = [
 ]
 
 # Version info
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __author__ = "omni-cache team"
 __description__ = "SmartPool adapter for omni-cache object pooling"
 

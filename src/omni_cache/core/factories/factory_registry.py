@@ -14,7 +14,6 @@ from omni_cache.adapters.file_cache.factory import FileCacheFactory
 from omni_cache.adapters.memcached.factory import MemcachedAdapterFactory
 from omni_cache.adapters.memory.factory import MemoryAdapterFactory
 from omni_cache.adapters.redis.factory import RedisAdapterFactory
-from omni_cache.adapters.smartpool.factory import SmartPoolAdapterFactory
 from omni_cache.core.exceptions import (
     FactoryNotFoundError,
     FactoryRegistrationError,
@@ -26,6 +25,13 @@ from omni_cache.core.interfaces import (
 
 from .abstract_factory import AbstractFactory
 from .factory_metadata import FactoryMetadata
+
+# Optional SmartPool factory
+SmartPoolAdapterFactory: type[AbstractFactory] | None
+try:
+    from omni_cache.adapters.smartpool.factory import SmartPoolAdapterFactory
+except ImportError:
+    SmartPoolAdapterFactory = None
 
 # Type variables
 T = TypeVar("T", bound=AdapterInterface)
@@ -73,6 +79,8 @@ class FactoryRegistry:
 
             # Register AdaptiveMemoryPool factory if available
             try:
+                if SmartPoolAdapterFactory is None:
+                    raise ImportError("SmartPool dependencies are not available")
                 self.register(SmartPoolAdapterFactory())
             except ImportError:
                 self._logger.debug(

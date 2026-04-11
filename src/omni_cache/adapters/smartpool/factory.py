@@ -38,7 +38,7 @@ class SmartPoolAdapterFactory(AbstractFactory):
             backend=CacheBackend.SMARTPOOL,
             factory_class="SmartPoolAdapterFactory",
             description="Factory for SmartPool adapters",  # Correction: SmartPool avec majuscule
-            version="1.1.0",
+            version="1.2.0",
             dependencies=["smartpool"],
             adapter_types=["pool"],
             config_schema={

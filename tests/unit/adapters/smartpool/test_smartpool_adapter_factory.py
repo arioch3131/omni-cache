@@ -69,7 +69,7 @@ class TestSmartPoolAdapterFactory:
         assert metadata.backend == CacheBackend.SMARTPOOL.value
         assert metadata.factory_class == "SmartPoolAdapterFactory"
         assert metadata.description == "Factory for SmartPool adapters"
-        assert metadata.version == "1.1.0"
+        assert metadata.version == "1.2.0"
         assert "smartpool" in metadata.dependencies
         assert "pool" in metadata.adapter_types
 

@@ -16,6 +16,9 @@ on:
       - 'requirements*.txt'
       - '.github/workflows/build.yml'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
