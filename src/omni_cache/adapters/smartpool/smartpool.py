@@ -14,8 +14,9 @@ Features:
 
 import threading
 import time
-from collections.abc import Iterator
-from contextlib import contextmanager
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
+from inspect import signature
 from typing import (
     Any,
     Generic,
@@ -53,6 +54,50 @@ except ImportError:
     SmartObjectManager = None  # type: ignore
 
 
+class _BorrowContext(Generic[T]):
+    """Context manager for borrow_fast without generator overhead."""
+
+    __slots__ = (
+        "_pool_manager",
+        "_obj_id",
+        "_key",
+        "_actual_obj",
+        "_obj",
+        "_track_stats",
+        "_adapter",
+    )
+
+    def __init__(
+        self,
+        pool_manager: "SmartObjectManager[T]",
+        obj_id: int,
+        key: Any,
+        actual_obj: T,
+        exposed_obj: T,
+        track_stats: bool,
+        adapter: "SmartPoolAdapter[T]",
+    ) -> None:
+        self._pool_manager = pool_manager
+        self._obj_id = obj_id
+        self._key = key
+        self._actual_obj = actual_obj
+        self._obj = exposed_obj
+        self._track_stats = track_stats
+        self._adapter = adapter
+
+    def __enter__(self) -> T:
+        return self._obj
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        _ = (exc_type, exc_val, exc_tb)
+        try:
+            self._pool_manager.release(self._obj_id, self._key, self._actual_obj)
+            if self._track_stats:
+                self._adapter._update_pool_stats("return", active=-1, idle=1)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            self._adapter._logger.error("Error releasing object: %s", e)
+
+
 # pylint: disable=too-many-ancestors
 class SmartPoolAdapter(BasePoolAdapter, Generic[T]):
     """
@@ -63,6 +108,14 @@ class SmartPoolAdapter(BasePoolAdapter, Generic[T]):
     """
 
     _config: SmartPoolAdapterConfig  # Add this line
+
+    @staticmethod
+    def _is_empty_pool_error(exc: Exception) -> bool:
+        """Return True if the exception indicates an empty-pool condition."""
+        if isinstance(exc, PoolEmptyError):
+            return True
+        message = str(exc).lower()
+        return "empty pool" in message or "pool is empty" in message
 
     def __init__(self, config: dict[str, Any] | SmartPoolAdapterConfig):
         if not SMARTPOOL_ADAPTER_AVAILABLE:
@@ -138,6 +191,34 @@ class SmartPoolAdapter(BasePoolAdapter, Generic[T]):
         """Expose config as public property (for backward compatibility)."""
         return self._config
 
+    def _smartpool_major_version(self) -> int | None:
+        """Return installed smartpool major version, or None if unknown."""
+        try:
+            raw_version = package_version("smartpool")
+        except PackageNotFoundError:
+            return None
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
+
+        head = raw_version.split(".", 1)[0]
+        if head.isdigit():
+            return int(head)
+        return None
+
+    def _default_metrics_mode_for_v2(self) -> Any:
+        """Return MetricsMode.SAMPLED when available, fallback to literal value."""
+        try:
+            from smartpool import MetricsMode as SmartPoolMetricsMode
+
+            return SmartPoolMetricsMode.SAMPLED
+        except Exception:  # pylint: disable=broad-exception-caught
+            try:
+                from smartpool.metrics import MetricsMode as SmartPoolMetricsModeLegacy
+
+                return SmartPoolMetricsModeLegacy.SAMPLED
+            except Exception:  # pylint: disable=broad-exception-caught
+                return "sampled"
+
     def _create_memory_config(self) -> MemoryConfig:
         """Create memory configuration for SmartPool."""
         max_objects_per_key = (
@@ -145,22 +226,44 @@ class SmartPoolAdapter(BasePoolAdapter, Generic[T]):
             if self.config.max_size_per_key is not None
             else self.config.max_size
         )
-        return MemoryConfig(
-            max_objects_per_key=max_objects_per_key,
-            ttl_seconds=self.config.max_age_seconds,
-            cleanup_interval_seconds=self.config.cleanup_interval,
-            enable_background_cleanup=self.config.enable_background_cleanup,
-            enable_performance_metrics=self.config.enable_performance_metrics,
-            enable_logging=False,  # DISABLE verbose SmartPool logs
-            max_validation_attempts=1,
-            max_corrupted_objects=3,
-            enable_acquisition_tracking=True,  # Enable for metrics
-            enable_lock_contention_tracking=True,  # Enable for metrics
-            max_performance_history_size=100,
-            max_expected_concurrency=10,
-            object_creation_cost=ObjectCreationCost.LOW,
-            memory_pressure=MemoryPressure.LOW,
-        )
+        memory_kwargs: dict[str, Any] = {
+            "max_objects_per_key": max_objects_per_key,
+            "ttl_seconds": self.config.max_age_seconds,
+            "cleanup_interval_seconds": self.config.cleanup_interval,
+            "enable_background_cleanup": self.config.enable_background_cleanup,
+            "enable_performance_metrics": self.config.enable_performance_metrics,
+            "enable_logging": False,  # DISABLE verbose SmartPool logs
+            "max_validation_attempts": 1,
+            "max_corrupted_objects": 3,
+            "enable_acquisition_tracking": True,  # Enable for metrics
+            "enable_lock_contention_tracking": True,  # Enable for metrics
+            "max_performance_history_size": 100,
+            "max_expected_concurrency": 10,
+            "object_creation_cost": ObjectCreationCost.LOW,
+            "memory_pressure": MemoryPressure.LOW,
+        }
+
+        extra_config = self.config.extra_config or {}
+        metrics_options = {
+            "metrics_mode": extra_config.get("metrics_mode"),
+            "metrics_sample_rate": extra_config.get("metrics_sample_rate"),
+            "metrics_queue_maxsize": extra_config.get("metrics_queue_maxsize"),
+        }
+        if self.config.enable_performance_metrics and self._smartpool_major_version() == 2:
+            metrics_options["metrics_mode"] = (
+                metrics_options["metrics_mode"] or self._default_metrics_mode_for_v2()
+            )
+            metrics_options["metrics_sample_rate"] = metrics_options["metrics_sample_rate"] or 1
+            metrics_options["metrics_queue_maxsize"] = (
+                metrics_options["metrics_queue_maxsize"] or 20_000
+            )
+
+        accepted_params = set(signature(MemoryConfig).parameters.keys())
+        for key, value in metrics_options.items():
+            if key in accepted_params and value is not None:
+                memory_kwargs[key] = value
+
+        return MemoryConfig(**memory_kwargs)
 
     def _create_pool_config(self) -> PoolConfiguration:
         """Create pool configuration for SmartPool."""
@@ -363,23 +466,38 @@ class SmartPoolAdapter(BasePoolAdapter, Generic[T]):
     # pylint: disable=unused-argument
     def get(self, *args: Any, timeout: float | None = None, **kwargs: Any) -> T | None:
         """Get an object from the pool (standard interface)."""
-        return self._safe_operation(
-            lambda: self._get_internal(*args, **kwargs), "get", default=None
-        )
+        # Fast path: avoid per-call state-lock in _safe_operation/is_connected() on hot path.
+        if self._pool is None:
+            raise AdapterNotConnectedError(self._config.name, "get")
+        return self._get_internal(*args, **kwargs)
 
     # pylint: disable=unused-argument
     def put(self, obj: T, timeout: float | None = None) -> bool:
         """Return an object to the pool (standard interface)."""
-        return self._safe_operation(lambda: self._put_internal(obj), "put", default=False)
+        # Fast path: avoid per-call state-lock in _safe_operation/is_connected() on hot path.
+        if self._pool is None:
+            raise AdapterNotConnectedError(self._config.name, "put")
+        return self._put_internal(obj)
 
     def _get_internal(self, *args: Any, **kwargs: Any) -> T | None:
         """Internal implementation of get operation."""
         if self._pool is None:
             raise AdapterNotConnectedError(f"Adapter {self.config.name} not connected")
         pool_manager: SmartObjectManager[T] = self._pool
+        cfg = self._config
+        track_stats = cfg.enable_stats and self._pool_stats is not None
         try:
-            final_args = args if args else self.config.factory_args
-            final_kwargs = {**self.config.factory_kwargs, **kwargs}
+            final_args = args if args else cfg.factory_args
+            base_kwargs = cfg.factory_kwargs
+            if kwargs:
+                final_kwargs = {**base_kwargs, **kwargs} if base_kwargs else kwargs
+            else:
+                final_kwargs = base_kwargs
+            # SmartPool expects acquisition key as first positional arg.
+            if not final_args and "key" in final_kwargs:
+                if final_kwargs is base_kwargs:
+                    final_kwargs = dict(final_kwargs)
+                final_args = (final_kwargs.pop("key"),)
 
             acquired_result = pool_manager.acquire(*final_args, **final_kwargs)
 
@@ -396,12 +514,14 @@ class SmartPoolAdapter(BasePoolAdapter, Generic[T]):
             # Track for later release using the ID of the object returned to the user
             self._borrowed_objects[id(object_to_return)] = (obj_id, key, actual_obj)
 
-            self._update_pool_stats("get", active=1, idle=-1)
+            if track_stats:
+                self._update_pool_stats("get", active=1, idle=-1)
             return cast(T, object_to_return)
 
         except Exception as e:  # pylint: disable=broad-exception-caught
             self._logger.error("Error getting object from pool: %s", e)
-            self._update_pool_stats("get", success=False)
+            if track_stats:
+                self._update_pool_stats("get", success=False)
             return None  # Returns None if catching an Exception
 
     def _put_internal(self, obj: T) -> bool:
@@ -409,25 +529,36 @@ class SmartPoolAdapter(BasePoolAdapter, Generic[T]):
         if self._pool is None:
             return False
         pool_manager: SmartObjectManager[T] = self._pool
+        track_stats = self._config.enable_stats and self._pool_stats is not None
         try:
             # Find the object in our tracking
             obj_key: int = id(obj)
             if obj_key in self._borrowed_objects:
                 obj_id, key, actual_obj = self._borrowed_objects.pop(obj_key)
+                needs_replenish = False
+                # Keep put() hot path lean: replenish only when returned object is invalid.
+                factory_ref = self._factory
+                if factory_ref is not None and factory_ref.validate_func is not None:
+                    try:
+                        needs_replenish = not factory_ref.validate(actual_obj)
+                    except Exception:  # pylint: disable=broad-exception-caught
+                        needs_replenish = True
                 pool_manager.release(obj_id, key, actual_obj)
-                self._ensure_pool_replenished()
-                self._update_pool_stats("put", active=-1, idle=1)
+                if needs_replenish:
+                    self._ensure_pool_replenished()
+                if track_stats:
+                    self._update_pool_stats("put", active=-1, idle=1)
                 return True
 
             self._logger.warning("Cannot return object to pool: object not tracked")
             return False
         except Exception as e:  # pylint: disable=broad-exception-caught
             self._logger.error("Error returning object to pool: %s", e)
-            self._update_pool_stats("put", success=False)
+            if track_stats:
+                self._update_pool_stats("put", success=False)
             return False
 
-    @contextmanager
-    def borrow(self, *args: Any, **kwargs: Any) -> Iterator[T]:
+    def borrow(self, *args: Any, **kwargs: Any) -> _BorrowContext[T]:
         """
         Context manager for borrowing objects from the pool.
 
@@ -436,44 +567,69 @@ class SmartPoolAdapter(BasePoolAdapter, Generic[T]):
                 # Use obj._obj to access the wrapped object
                 pass
         """
-        if not self.is_connected():
-            raise AdapterNotConnectedError(f"Adapter {self.config.name} not connected")
-        pool_manager: SmartObjectManager[T] = cast(SmartObjectManager[T], self._pool)
+        return self.borrow_fast(*args, **kwargs)
 
-        acquired_obj_data = None
-        try:
-            # Use provided args/kwargs or defaults from config
-            final_args = args or self.config.factory_args
-            final_kwargs = {**self.config.factory_kwargs, **kwargs}
-            acquired_result = pool_manager.acquire(*final_args, **final_kwargs)
-            if cast(int, acquired_result) == 0:
-                raise PoolEmptyError("SmartPool returned 0, indicating an empty pool.")
+    def borrow_fast(self, *args: Any, **kwargs: Any) -> _BorrowContext[T]:
+        """
+        Fast borrow path: acquire in method, return lightweight context object.
+        """
+        pool_ref = self._pool
+        if pool_ref is None:
+            raise AdapterNotConnectedError(f"Adapter {self._config.name} not connected")
 
-            obj_id, key, actual_obj = acquired_result
+        cfg = self._config
+        final_args = args if args else cfg.factory_args
+        base_kwargs = cfg.factory_kwargs
+        if kwargs:
+            final_kwargs = {**base_kwargs, **kwargs} if base_kwargs else kwargs
+        else:
+            final_kwargs = base_kwargs
+        if not final_args and "key" in final_kwargs:
+            if final_kwargs is base_kwargs:
+                final_kwargs = dict(final_kwargs)
+            final_args = (final_kwargs.pop("key"),)
 
-            # If auto_wrap_objects is enabled, yield the wrapped object
-            if self.config.auto_wrap_objects:
-                wrapped_obj: T | AutoWeakRefWrapper[T] = self._wrap_object(actual_obj)
-                acquired_obj_data = (obj_id, key, actual_obj)  # Track original for release
-                yield cast(T, wrapped_obj)  # Yield the wrapped object
-            else:
-                acquired_obj_data = (obj_id, key, actual_obj)  # Track original for release
-                yield actual_obj  # Yield the actual object
+        acquire_error: Exception | None = None
+        max_empty_retries = 2
+        for _attempt in range(max_empty_retries + 1):
+            try:
+                acquired = pool_ref.acquire(*final_args, **final_kwargs)
+                if not isinstance(acquired, tuple) or len(acquired) != 3:
+                    raise PoolEmptyError("empty pool")
+                obj_id, key, actual_obj = acquired
+                if obj_id == 0:
+                    raise PoolEmptyError("empty pool")
+                acquire_error = None
+                break
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                acquire_error = e
+                if self._is_empty_pool_error(e):
+                    self._ensure_pool_replenished()
+                    continue
+                break
 
-            self._update_pool_stats("borrow", active=1, idle=-1)  # Unwrap before yielding
+        if acquire_error is not None:
+            self._logger.error("Error acquiring object: %s", acquire_error)
+            if self._is_empty_pool_error(acquire_error):
+                if isinstance(acquire_error, PoolEmptyError):
+                    raise acquire_error
+                raise PoolEmptyError("empty pool") from acquire_error
+            raise acquire_error
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            self._logger.error("Error in borrow context: %s", e)
-            self._update_pool_stats("borrow", success=False)
-            raise PoolEmptyError(f"Unable to borrow object: {e}") from e
-        finally:
-            if acquired_obj_data is not None:
-                obj_id, key, actual_obj = acquired_obj_data
-                try:
-                    pool_manager.release(obj_id, key, actual_obj)
-                    self._update_pool_stats("return", active=-1, idle=1)
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    self._logger.error("Error releasing object: %s", e)
+        track_stats = cfg.enable_stats and self._pool_stats is not None
+        if track_stats:
+            self._update_pool_stats("borrow", active=1, idle=-1)
+
+        exposed = self._wrap_object(actual_obj) if cfg.auto_wrap_objects else actual_obj
+        return _BorrowContext(
+            pool_manager=pool_ref,
+            obj_id=obj_id,
+            key=key,
+            actual_obj=actual_obj,
+            exposed_obj=cast(T, exposed),
+            track_stats=track_stats,
+            adapter=self,
+        )
 
     # Performance metrics methods
     def get_performance_metrics(self) -> dict[str, Any]:

@@ -3,7 +3,7 @@ A Cache Router.
 """
 
 import logging
-from typing import Any, TypeVar, cast
+from typing import TypeVar
 
 from omni_cache.core.adapter_registry import AdapterRegistry, ManagerConfig
 from omni_cache.core.exceptions import AdapterNotFoundError
@@ -36,6 +36,7 @@ class CacheRouter:
         self._registry = registry
         self._logger = logger
         self._routing_rules: dict[str, str] = {}  # namespace -> adapter_name
+        self._cache_adapter_cache: dict[str, KeyValueInterface] = {}
 
     def add_routing_rule(self, namespace: str, adapter_name: str) -> None:
         """
@@ -63,6 +64,25 @@ class CacheRouter:
         """
         return self._routing_rules.pop(namespace, None) is not None
 
+    def invalidate_cache_adapter(self, adapter_name: str | None = None) -> None:
+        """Invalidate cached connected cache adapters."""
+        if adapter_name is None:
+            self._cache_adapter_cache.clear()
+            return
+        self._cache_adapter_cache.pop(adapter_name, None)
+
+    def register_cache_adapter(self, adapter_name: str, adapter: KeyValueInterface) -> None:
+        """Register a cache adapter directly in the router fast-path cache."""
+        self._cache_adapter_cache[adapter_name] = adapter
+
+    def get_cached_cache_adapter(self, adapter_name: str) -> KeyValueInterface | None:
+        """Return cache adapter from hot-path cache without any fallback logic."""
+        return self._cache_adapter_cache.get(adapter_name)
+
+    def has_routing_rules(self) -> bool:
+        """Return True when at least one namespace routing rule exists."""
+        return bool(self._routing_rules)
+
     def _route_adapter(self, key: K | None = None, adapter_name: str | None = None) -> str | None:
         """
         A route to an adapter.
@@ -77,7 +97,7 @@ class CacheRouter:
         if adapter_name:
             return adapter_name
 
-        if self._config.enable_routing and key is not None:
+        if self._config.enable_routing and self._routing_rules and key is not None:
             key_str = str(key)
 
             # First check: Direct namespace match (e.g., key="123" matches rule "123")
@@ -91,6 +111,37 @@ class CacheRouter:
                     return self._routing_rules[namespace]
 
         return self._config.default_adapter
+
+    @staticmethod
+    def _is_connected_adapter(adapter: object) -> bool:
+        """Check adapter connectivity without static casts."""
+        fast_attr = getattr(type(adapter), "is_connected_fast", None)
+        if callable(fast_attr):
+            return bool(fast_attr(adapter))
+
+        check_attr = getattr(adapter, "is_connected", None)
+        if callable(check_attr):
+            return bool(check_attr())
+        return False
+
+    def _get_connected_cache_adapter(self, adapter_name: str | None) -> KeyValueInterface | None:
+        """Return a connected cache adapter by name, else None."""
+        if not adapter_name:
+            return None
+
+        cached = self._cache_adapter_cache.get(adapter_name)
+        if cached is not None:
+            # Hot path: trust router-level cache and avoid connectivity checks per request.
+            return cached
+
+        adapter = self._registry.get_cache_adapter(adapter_name)
+        if adapter is None:
+            return None
+
+        if self._is_connected_adapter(adapter):
+            self._cache_adapter_cache[adapter_name] = adapter
+            return adapter
+        return None
 
     def get_cache_adapter(
         self, key: K | None = None, adapter_name: str | None = None
@@ -106,16 +157,23 @@ class CacheRouter:
             A KeyValue Interface.
         """
         target_adapter = self._route_adapter(key, adapter_name)
-
         if target_adapter:
-            adapter = self._registry.get_cache_adapter(target_adapter)
-            if adapter and cast(Any, adapter).is_connected():
+            # Fast-path: direct dictionary lookup for steady-state runtime.
+            cached = self._cache_adapter_cache.get(target_adapter)
+            if cached is not None:
+                return cached
+
+            adapter = self._get_connected_cache_adapter(target_adapter)
+            if adapter:
                 return adapter
 
-        if self._config.fallback_adapter:
-            fallback = self._registry.get_cache_adapter(self._config.fallback_adapter)
-            if fallback and cast(Any, fallback).is_connected():
-                self._logger.warning(f"Using fallback adapter: {self._config.fallback_adapter}")
+        fallback_name = self._config.fallback_adapter
+        if fallback_name and fallback_name != target_adapter:
+            fallback = self._cache_adapter_cache.get(fallback_name)
+            if fallback is None:
+                fallback = self._get_connected_cache_adapter(fallback_name)
+            if fallback:
+                self._logger.warning("Using fallback adapter: %s", fallback_name)
                 return fallback
 
         raise AdapterNotFoundError(f"No suitable cache adapter found for key: {key}")
@@ -134,12 +192,12 @@ class CacheRouter:
 
         if target_adapter:
             adapter = self._registry.get_pool_adapter(target_adapter)
-            if adapter and cast(Any, adapter).is_connected():
+            if adapter and self._is_connected_adapter(adapter):
                 return adapter
 
         if self._config.fallback_adapter:
             fallback = self._registry.get_pool_adapter(self._config.fallback_adapter)
-            if fallback and cast(Any, fallback).is_connected():
+            if fallback and self._is_connected_adapter(fallback):
                 self._logger.warning(
                     f"Using fallback pool adapter: {self._config.fallback_adapter}"
                 )

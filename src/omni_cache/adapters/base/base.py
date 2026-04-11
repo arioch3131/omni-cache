@@ -220,6 +220,15 @@ class BaseAdapter(AdapterInterface, StatisticsInterface, Configurable, ABC):
         with self._state_lock:
             return self._state == ConnectionState.CONNECTED
 
+    def is_connected_fast(self) -> bool:
+        """
+        Fast-path connectivity check for hot paths.
+
+        This avoids lock acquisition and may be marginally stale during
+        concurrent state transitions, but is suitable for routing fast paths.
+        """
+        return self._state == ConnectionState.CONNECTED
+
     def _connect_with_retry(self) -> bool:
         """Connect with retry logic."""
         for attempt in range(self._config.max_retries + 1):

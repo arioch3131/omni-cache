@@ -212,3 +212,8 @@ GEMINI.md
 
 # Claude
 CLAUDE.md
+
+artifacts/
+.codex
+.benchmarks/
+

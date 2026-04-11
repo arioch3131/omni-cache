@@ -60,7 +60,7 @@ class TestMemoryAdapterFactoryInitialization:
         assert factory._metadata.backend == CacheBackend.MEMORY.value
         assert factory._metadata.factory_class == "MemoryAdapterFactory"
         assert factory._metadata.description == "Factory for in-memory cache adapters"
-        assert factory._metadata.version == "1.1.0"
+        assert factory._metadata.version == "1.2.0"
         assert factory._metadata.dependencies == []
         assert factory._metadata.adapter_types == ["cache"]
 
@@ -102,7 +102,7 @@ class TestMemoryAdapterFactoryMetadata:
         assert metadata.backend == CacheBackend.MEMORY.value
         assert metadata.factory_class == "MemoryAdapterFactory"
         assert metadata.description == "Factory for in-memory cache adapters"
-        assert metadata.version == "1.1.0"
+        assert metadata.version == "1.2.0"
         assert metadata.dependencies == []
         assert metadata.adapter_types == ["cache"]
 

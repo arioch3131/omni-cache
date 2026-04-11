@@ -50,7 +50,10 @@ class SimpleSmartPoolFactory(ObjectFactory):
         try:
             # Use class args/kwargs by default, but allow override
             final_args = args or self.factory_args
-            final_kwargs = {**self.factory_kwargs, **kwargs}
+            if kwargs:
+                final_kwargs = {**self.factory_kwargs, **kwargs}
+            else:
+                final_kwargs = self.factory_kwargs
             obj = self.factory_func(*final_args, **final_kwargs)
 
             # Auto-wrap if requested
@@ -109,18 +112,24 @@ class SimpleSmartPoolFactory(ObjectFactory):
         """
         Generates a unique key based on the arguments used to create an object.
         """
-        key_parts = [str(arg) for arg in args or self.factory_args]
-        key_parts.extend(
-            f"{key}={value}"
-            for key, value in sorted(kwargs.items() or sorted(self.factory_kwargs.items()))
-        )
+        effective_args = args or self.factory_args
+        if kwargs:
+            effective_kwargs = {**self.factory_kwargs, **kwargs} if self.factory_kwargs else kwargs
+        else:
+            effective_kwargs = self.factory_kwargs
 
-        if not key_parts:
+        if not effective_args and not effective_kwargs:
             return "default_pool_key"
 
-        final_key = "_".join(key_parts)
+        # Fast path: dominant borrow case with a single key argument and no kwargs.
+        if len(effective_args) == 1 and not effective_kwargs:
+            return str(effective_args[0])
 
-        return final_key
+        key_parts = [str(arg) for arg in effective_args]
+        if effective_kwargs:
+            key_parts.extend(f"{key}={value}" for key, value in sorted(effective_kwargs.items()))
+
+        return "_".join(key_parts)
 
     # pylint: disable=protected-access
     def estimate_size(self, obj: Any) -> int:

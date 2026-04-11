@@ -18,6 +18,9 @@ on:
       - 'requirements*.txt'
       - '.github/workflows/pytest.yml'
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -47,7 +50,7 @@ jobs:
 
     - name: Install SmartPool (public)
       run: |
-        pip install "git+https://github.com/arioch3131/smartpool.git@1.0.0"
+        pip install "git+https://github.com/arioch3131/smartpool.git@2.0.0"
 
     - name: Run tests
       run: |

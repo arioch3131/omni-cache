@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omni_cache"
-version = "1.1.0"
+version = "1.2.0"
 description = "A highly modular and extensible generic memory pool for efficient object reuse"
 readme = "README.md"
 license = {text = "MIT"}
@@ -33,7 +33,7 @@ dependencies = []
 # Backend dependencies
 redis = ["redis>=4.0.0"]
 memcached = ["pymemcache>=3.0.0"]
-smartpool = ["smartpool @ git+https://github.com/arioch3131/smartpool.git@1.0.0"]
+smartpool = ["smartpool @ git+https://github.com/arioch3131/smartpool.git@2.0.0"]
 
 # Feature groups
 async = ["redis>=4.0.0"]
@@ -78,7 +78,7 @@ dev = [
 all = [
     "redis>=4.0.0",
     "pymemcache>=3.0.0", 
-    "smartpool @ git+https://github.com/arioch3131/smartpool.git@1.0.0",
+    "smartpool @ git+https://github.com/arioch3131/smartpool.git@2.0.0",
     "aioredis>=2.0.0",
     "prometheus-client>=0.14.0",
     "msgpack>=1.0.0"
