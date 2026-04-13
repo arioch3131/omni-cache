@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.abspath("../src"))
 project = "Omni-Cache"
 copyright = "2024, Omni-Cache"
 author = "Omni-Cache"
-release = "1.2.0"
-version = "1.2.0"
+release = "2.0.0"
+version = "2.0.0"
 
 extensions = [
     "myst_parser",

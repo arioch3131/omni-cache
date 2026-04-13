@@ -8,11 +8,11 @@ class CacheBackend(Enum):
     """Enumeration of supported cache backends."""
 
     MEMORY = "memory"
+    DISK = "disk"
     REDIS = "redis"
     MEMCACHED = "memcached"
     SMARTPOOL = "smartpool"
     CUSTOM = "custom"
-    FILE_CACHE = "file_cache"
 
 
 @dataclass

@@ -12,7 +12,6 @@ Getting Started Scripts
 - ``examples/getting_started/basic_async_redis_adapter.py``
 - ``examples/getting_started/basic_memcached_adapter.py``
 - ``examples/getting_started/basic_smartpool_adapter.py``
-- ``examples/getting_started/custom_file_cache_adapter.py``
 - ``examples/getting_started/cache_aside_pattern.py``
 - ``examples/getting_started/http_api_response_cache.py``
 - ``examples/getting_started/db_query_cache_with_invalidation.py``

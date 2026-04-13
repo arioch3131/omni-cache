@@ -60,6 +60,36 @@ Redis backend for distributed caching:
 * **ssl** (bool): Use SSL connection
 * **connection_pool_size** (int): Connection pool size
 
+Disk Adapter
+~~~~~~~~~~~~
+
+Disk backend using binary payload files with an SQLite index:
+
+.. code-block:: python
+
+   from omni_cache import CacheBackend, create_adapter
+
+   disk_adapter = create_adapter(
+       CacheBackend.DISK,
+       {
+           "cache_dir": "./omni_cache_disk",
+           "default_ttl": 3600,
+           "renew_on_hit": True,
+           "renew_threshold": 0.2,
+       },
+   )
+
+**Configuration Options:**
+
+* **cache_dir** (str): Base directory where payload files are stored
+* **sqlite_path** (str | None): Optional path to SQLite index file
+* **default_ttl** (float | None): Default TTL used when ``ttl`` is not passed to ``set``
+* **renew_on_hit** (bool): Enable TTL extension on access
+* **renew_threshold** (float): Renewal window ratio in ``(0, 1]``
+* **cleanup_interval_sec** (float): Periodic cleanup interval
+* **batch_flush_interval_sec** (float): Hit batch flush interval
+* **batch_flush_max_pending** (int): Max pending hit keys before forced flush
+
 SmartPool Adapter
 ~~~~~~~~~~~~~~~~~
 

@@ -10,7 +10,7 @@ import logging
 import threading
 from typing import Any, TypeVar, cast
 
-from omni_cache.adapters.file_cache.factory import FileCacheFactory
+from omni_cache.adapters.disk.factory import DiskAdapterFactory
 from omni_cache.adapters.memcached.factory import MemcachedAdapterFactory
 from omni_cache.adapters.memory.factory import MemoryAdapterFactory
 from omni_cache.adapters.redis.factory import RedisAdapterFactory
@@ -59,9 +59,7 @@ class FactoryRegistry:
         try:
             # Always register memory factory (no dependencies)
             self.register(MemoryAdapterFactory())
-
-            # Register FileCache factory (no dependencies)
-            self.register(FileCacheFactory())
+            self.register(DiskAdapterFactory())
 
             # Register Redis factory if dependencies available
             try:

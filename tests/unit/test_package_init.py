@@ -212,7 +212,7 @@ class TestInitFile:
                 omni_cache,
                 "get_version_info",
                 return_value={
-                    "version": "1.2.0",
+                    "version": "2.0.0",
                     "python_version": "3.9",
                     "capabilities": {"redis_adapter": True, "adaptive_adapter": False},
                     "available_backends": ["memory", "redis"],
