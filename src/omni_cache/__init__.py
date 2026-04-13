@@ -50,7 +50,7 @@ Advanced usage:
 """
 
 # Version information
-__version__ = "1.2.0"
+__version__ = "2.0.0"
 __author__ = "Omni-Cache Contributors"
 __license__ = "MIT"
 __description__ = "Universal cache and pool manager with pluggable backends"
@@ -62,6 +62,10 @@ import warnings
 from collections.abc import Callable
 from typing import Any, cast
 
+from .adapters.disk import (
+    DiskAdapter,
+    DiskAdapterConfig,
+)
 from .adapters.memory import (
     CacheItem,
     MemoryAdapter,
@@ -115,6 +119,7 @@ from .core.exceptions import (
 )
 from .core.factories import (
     AbstractFactory,
+    DiskAdapterFactory,
     FactoryMetadata,
     FactoryRegistry,
     MemcachedAdapterFactory,
@@ -504,6 +509,7 @@ __all__ = [
     "AbstractFactory",
     "FactoryRegistry",
     "FactoryMetadata",
+    "DiskAdapterFactory",
     "MemoryAdapterFactory",
     "MemcachedAdapterFactory",
     "RedisAdapterFactory",
@@ -560,6 +566,8 @@ __all__ = [
     # Built-in adapters
     "MemoryAdapter",
     "MemoryAdapterConfig",
+    "DiskAdapter",
+    "DiskAdapterConfig",
     "CacheItem",
     "MemcachedAdapter",
     "MemcachedAdapterConfig",

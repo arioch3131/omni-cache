@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omni_cache"
-version = "1.2.0"
+version = "2.0.0"
 description = "A highly modular and extensible generic memory pool for efficient object reuse"
 readme = "README.md"
 license = {text = "MIT"}
@@ -152,8 +152,7 @@ show_error_codes = true
 module = [
     "redis.*",
     "pymemcache.*",
-    "smartpool.*",
-    "prometheus_client.*"
+    "smartpool.*"
 ]
 ignore_missing_imports = true
 

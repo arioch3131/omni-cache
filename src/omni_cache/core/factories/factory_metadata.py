@@ -25,7 +25,7 @@ class FactoryMetadata:
     backend: str | CacheBackend
     factory_class: str
     description: str
-    version: str = "1.2.0"
+    version: str = "2.0.0"
     dependencies: list[str] = field(default_factory=list)
     config_schema: dict[str, Any] | None = None
     adapter_types: list[str] = field(default_factory=list)  # ["cache", "pool"]

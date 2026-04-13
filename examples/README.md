@@ -14,7 +14,6 @@ This folder is organized into three levels:
 4. `python examples/getting_started/basic_async_redis_adapter.py`
 5. `python examples/getting_started/basic_memcached_adapter.py`
 6. `python examples/getting_started/basic_smartpool_adapter.py`
-7. `python examples/getting_started/custom_file_cache_adapter.py`
 8. `python examples/getting_started/cache_aside_pattern.py`
 9. `python examples/getting_started/http_api_response_cache.py`
 10. `python examples/getting_started/db_query_cache_with_invalidation.py`

@@ -357,7 +357,7 @@ Factory for File Cache
 
        def _get_default_metadata(self) -> FactoryMetadata:
            return FactoryMetadata(
-               backend=CacheBackend.FILE_CACHE.value,
+               backend=CacheBackend.YOUR_BACKEND.value,
                factory_class=self.__class__.__name__,
                adapter_types=[FileCacheAdapter.__name__],
                description="File-system based cache adapter",
@@ -513,16 +513,16 @@ Once implemented, use your custom adapter:
    manager = setup()
    
    file_adapter = create_adapter(
-       CacheBackend.FILE_CACHE,
+       CacheBackend.YOUR_BACKEND,
        {"cache_dir": "/tmp/my_cache"}
    )
    
-   manager.register_adapter("file_cache", file_adapter)
+   manager.register_adapter("custom_cache", file_adapter)
 
    # Use with decorators
    from omni_cache import cached
 
-   @cached(ttl=300, adapter="file_cache")
+   @cached(ttl=300, adapter="custom_cache")
    def expensive_function(x):
        return complex_computation(x)
 

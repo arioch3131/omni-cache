@@ -80,20 +80,6 @@ SmartPool Adapter
    :undoc-members:
    :show-inheritance:
 
-File Cache Adapter
-------------------
-
-.. automodule:: omni_cache.adapters.file_cache
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: omni_cache.adapters.file_cache.file_cache
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: omni_cache.adapters.file_cache.factory
    :members:
    :undoc-members:
    :show-inheritance:

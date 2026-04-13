@@ -2,6 +2,7 @@
 Declares all factories.
 """
 
+from omni_cache.adapters.disk.factory import DiskAdapterFactory
 from omni_cache.adapters.memcached.factory import MemcachedAdapterFactory
 from omni_cache.adapters.memory.factory import MemoryAdapterFactory
 from omni_cache.adapters.redis.factory import RedisAdapterFactory
@@ -31,6 +32,7 @@ __all__ = [
     "FactoryRegistry",
     # Built-in factories
     "MemoryAdapterFactory",
+    "DiskAdapterFactory",
     "MemcachedAdapterFactory",
     "RedisAdapterFactory",
     "SmartPoolAdapterFactory",

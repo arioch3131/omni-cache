@@ -10,7 +10,7 @@ Omni-Cache is split into four main layers:
 
 1. Public API layer (``omni_cache.__init__``)
 2. Core orchestration layer (manager, routing, registry, config)
-3. Adapter implementations (memory, redis, smartpool, file_cache)
+3. Adapter implementations (memory, redis, smartpool)
 4. Utility layer (decorators)
 
 Core Orchestration
@@ -44,7 +44,6 @@ Built-in adapters:
 - ``omni_cache.adapters.memory``: in-memory cache with TTL and eviction
 - ``omni_cache.adapters.redis``: Redis-backed distributed cache
 - ``omni_cache.adapters.smartpool``: object pooling integration
-- ``omni_cache.adapters.file_cache``: file-based cache example/reference
 
 All adapters share connection/state/stats behavior through
 ``omni_cache.adapters.base.BaseAdapter`` and its specializations.

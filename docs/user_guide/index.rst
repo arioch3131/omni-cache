@@ -17,6 +17,7 @@ This section provides comprehensive documentation for using Omni-Cache.
    async_support
    performance
    troubleshooting
+   migration_file_cache_to_disk
 
 Getting Started
 ===============

@@ -198,6 +198,37 @@ Redis Adapter
 * **connection_pool_max_connections** (int): Max pool connections
 * **retry_on_timeout** (bool): Retry operations on timeout
 
+Disk Adapter
+~~~~~~~~~~~~
+
+.. code-block:: yaml
+
+   adapters:
+     disk:
+       backend: "disk"
+       enabled: true
+       auto_connect: true
+       extra_config:
+         cache_dir: "./omni_cache_disk"      # Payload file root directory
+         sqlite_path: null                   # Optional custom SQLite file
+         default_ttl: 3600                   # Default entry TTL
+         renew_on_hit: false                 # Enable sliding expiration
+         renew_threshold: 0.2                # Renewal window ratio
+         cleanup_interval_sec: 60            # Background cleanup interval
+         batch_flush_interval_sec: 5         # Batch hit flush interval
+         batch_flush_max_pending: 1000       # Batch hit flush threshold
+
+**Configuration Options:**
+
+* **cache_dir** (str): Base directory used for payload file storage
+* **sqlite_path** (str | None): Custom SQLite index path (optional)
+* **default_ttl** (float | None): TTL used when ``set(..., ttl=...)`` is omitted
+* **renew_on_hit** (bool): Enable TTL renewal on ``get`` under threshold
+* **renew_threshold** (float): Renewal ratio in ``(0, 1]``
+* **cleanup_interval_sec** (float): Periodic cleanup cadence
+* **batch_flush_interval_sec** (float): Periodic flush cadence for hit batches
+* **batch_flush_max_pending** (int): Hit-key threshold before immediate flush
+
 SmartPool Adapter
 ~~~~~~~~~~~~~~~~~
 

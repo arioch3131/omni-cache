@@ -8,23 +8,17 @@ Adapters are imported conditionally based on available dependencies.
 from typing import Any
 
 from .base.base import BaseAdapter
+from .disk import DiskAdapter, DiskAdapterConfig
 from .memory import MemoryAdapter, MemoryAdapterConfig
 
 # Always available adapters
-__all__ = ["BaseAdapter", "MemoryAdapter", "MemoryAdapterConfig"]
-
-# Conditionally import FileCache adapter
-FileCacheAdapter: Any = None
-FileCacheConfig: Any = None
-try:
-    from .file_cache import FileCacheAdapter, FileCacheConfig
-
-    __all__.extend(["FileCacheAdapter", "FileCacheConfig"])
-    _ = FileCacheConfig
-    HAS_FILECACHE_ADAPTER = True
-
-except ImportError:
-    HAS_FILECACHE_ADAPTER = False
+__all__ = [
+    "BaseAdapter",
+    "MemoryAdapter",
+    "MemoryAdapterConfig",
+    "DiskAdapter",
+    "DiskAdapterConfig",
+]
 
 # Conditionally import Redis adapter
 RedisAdapter: Any = None
@@ -71,7 +65,6 @@ __all__.extend(
         "HAS_REDIS_ADAPTER",
         "HAS_MEMCACHED_ADAPTER",
         "HAS_SMARTPOOL_ADAPTER",
-        "HAS_FILECACHE_ADAPTER",
     ]
 )
 
@@ -85,10 +78,8 @@ def list_available_adapters() -> dict[str, type[Any]]:
     """
     adapters: dict[str, type[Any]] = {
         "memory": MemoryAdapter,
+        "disk": DiskAdapter,
     }
-
-    if HAS_FILECACHE_ADAPTER:
-        adapters["file_cache"] = FileCacheAdapter
 
     if HAS_REDIS_ADAPTER:
         adapters["redis"] = RedisAdapter
@@ -120,15 +111,14 @@ def get_adapter_info() -> dict[str, dict[str, Any]]:
         "features": ["ttl", "eviction_policies", "thread_safe", "size_limits"],
     }
 
-    # FileCache adapter (conditional)
-    if HAS_FILECACHE_ADAPTER:
-        info["file_cache"] = {
-            "class": "FileCacheAdapter",
-            "backend": "file_cache",
-            "description": "File-system based cache",
-            "dependencies": [],
-            "features": ["persistent", "ttl", "thread_safe"],
-        }
+    # Disk adapter (always available)
+    info["disk"] = {
+        "class": "DiskAdapter",
+        "backend": "disk",
+        "description": "Disk-backed cache (SQLite index + binary files)",
+        "dependencies": [],
+        "features": ["persistent", "ttl", "renew_on_hit", "thread_safe"],
+    }
 
     # Redis adapter (conditional)
     if HAS_REDIS_ADAPTER:

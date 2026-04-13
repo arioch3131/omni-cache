@@ -7,7 +7,6 @@ and adapter scaffolding.
 Relevant Scripts
 ----------------
 
-- ``examples/getting_started/custom_file_cache_adapter.py``
 - ``scripts/new_adapter.py``
 
 Generate a New Adapter Scaffold
