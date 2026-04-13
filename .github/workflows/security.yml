@@ -2,7 +2,7 @@ name: Security Scan
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, chore-release-*, release/* ]
     paths:
       - 'src/**'
       - 'examples/**'

@@ -2,7 +2,7 @@ name: Tests (PyTest)
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, chore-release-*, release/* ]
     paths:
       - 'src/**'
       - 'tests/**'
