@@ -28,6 +28,7 @@ class DiskAdapterFactory(AbstractFactory):
                     "name": {"type": "string", "default": "disk"},
                     "cache_dir": {"type": "string", "default": "omni_cache_disk"},
                     "sqlite_path": {"type": ["string", "null"], "default": None},
+                    "max_size_bytes": {"type": ["integer", "null"], "minimum": 1, "default": None},
                     "default_ttl": {"type": ["number", "null"], "minimum": 0},
                     "renew_on_hit": {"type": "boolean", "default": False},
                     "renew_threshold": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
@@ -46,6 +47,9 @@ class DiskAdapterFactory(AbstractFactory):
     def _setup_config_validators(self) -> None:
         self.add_config_validator("cache_dir", lambda x: isinstance(x, str) and bool(x.strip()))
         self.add_config_validator("sqlite_path", lambda x: x is None or isinstance(x, str))
+        self.add_config_validator(
+            "max_size_bytes", lambda x: x is None or (isinstance(x, int) and x > 0)
+        )
         self.add_config_validator(
             "default_ttl",
             lambda x: x is None or (isinstance(x, (int, float)) and x > 0),

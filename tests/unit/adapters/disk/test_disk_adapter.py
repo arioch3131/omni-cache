@@ -233,3 +233,20 @@ def test_disk_backend_info_exposes_extended_metrics(tmp_path):
         assert "pending_flush_count" in info["disk_metrics"]
     finally:
         adapter.disconnect()
+
+
+def test_max_size_bytes_evicts_oldest_entry(tmp_path):
+    adapter = _build_adapter(tmp_path, max_size_bytes=300)
+    try:
+        assert adapter.set("k1", b"x" * 100) is True
+        time.sleep(0.01)
+        assert adapter.set("k2", b"y" * 100) is True
+        time.sleep(0.01)
+        assert adapter.set("k3", b"z" * 100) is True
+
+        assert adapter.size() == 2
+        assert adapter.get("k1") is None
+        assert adapter.get("k2") == b"y" * 100
+        assert adapter.get("k3") == b"z" * 100
+    finally:
+        adapter.disconnect()

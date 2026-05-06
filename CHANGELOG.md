@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-05-06
+
+### Fixed
+- SmartPool adapter health check semantics now preserve SmartPool's 3-level contract:
+  - `critical` is treated as unhealthy.
+  - `warning` is treated as healthy (informational) to avoid false unhealthy states during expected cold-start phases.
+
+### Added
+- Disk adapter now supports `max_size_bytes` with deterministic eviction when size limits are exceeded (oldest entries by `updated_at` are evicted first).
+- Expanded integration/performance suites for high-volume and multi-process disk workloads.
+
+### Changed
+- Release plan references aligned to defer disk eviction strategy follow-ups to `2.1.0`.
+
+### Fixed
+- Disk reconciliation no longer removes valid payload files during limited-window reconciliation runs (`limit` mode), preventing false orphan cleanup under high-volume and multi-process workloads.
+
 ## [2.0.0] - 2026-04-13
 
 ### Breaking Changes

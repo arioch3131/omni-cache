@@ -192,8 +192,11 @@ class DiskAdapter(BaseCacheAdapter, KeyValueInterface[str, Any]):
                 ),
             )
             conn.commit()
+            evicted = self._enforce_max_size_bytes(conn, now)
 
         self._update_cache_stats("set", success=True, size=self._size_impl())
+        for _ in range(evicted):
+            self._update_cache_stats("eviction")
         self._maybe_opportunistic_cleanup(now)
         return True
 
@@ -481,6 +484,58 @@ class DiskAdapter(BaseCacheAdapter, KeyValueInterface[str, Any]):
         reconciliation = self._reconcile_disk_index()
         return removed_expired + reconciliation["stale_rows_removed"]
 
+    def _enforce_max_size_bytes(self, conn: sqlite3.Connection, now: float) -> int:
+        """Evict oldest non-expired entries when max_size_bytes is configured and exceeded."""
+        if self._config.max_size_bytes is None:
+            return 0
+
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(size_bytes), 0)
+            FROM cache_entries
+            WHERE expires_at IS NULL OR expires_at > ?
+            """,
+            (now,),
+        ).fetchone()
+        current_size_bytes = int(row[0] if row else 0)
+        overflow = current_size_bytes - self._config.max_size_bytes
+        if overflow <= 0:
+            return 0
+
+        rows = conn.execute(
+            """
+            SELECT key, path, size_bytes
+            FROM cache_entries
+            WHERE expires_at IS NULL OR expires_at > ?
+            ORDER BY updated_at ASC
+            """,
+            (now,),
+        ).fetchall()
+        if not rows:
+            return 0
+
+        bytes_to_free = overflow
+        rows_to_evict: list[tuple[str, str]] = []
+        for key, path, size_bytes in rows:
+            rows_to_evict.append((str(key), str(path)))
+            bytes_to_free -= int(size_bytes) if size_bytes is not None else 0
+            if bytes_to_free <= 0:
+                break
+
+        if not rows_to_evict:
+            return 0
+
+        conn.executemany("DELETE FROM cache_entries WHERE key = ?", [(row[0],) for row in rows_to_evict])
+        conn.commit()
+
+        for _, relative_path in rows_to_evict:
+            try:
+                (self._cache_dir / relative_path).unlink(missing_ok=True)
+            except OSError:
+                continue
+
+        return len(rows_to_evict)
+
     def _delete_expired_entry(self, key: str, path: str, size_bytes: int) -> None:
         """Delete a known expired key and account reclaimed bytes."""
         with self._db_lock:
@@ -539,6 +594,16 @@ class DiskAdapter(BaseCacheAdapter, KeyValueInterface[str, Any]):
                 conn.executemany("DELETE FROM cache_entries WHERE key = ?", stale_keys)
                 conn.commit()
 
+        # When reconciliation runs on a limited row window (startup/opportunistic mode),
+        # indexed_paths is incomplete. In that mode, skip orphan-file sweeping to avoid
+        # deleting valid payload files that are simply outside the selected window.
+        if limit is not None:
+            return {
+                "stale_rows_removed": len(stale_keys),
+                "orphan_files_removed": 0,
+                "orphan_bytes_reclaimed": 0,
+            }
+
         orphan_files_removed = 0
         orphan_bytes_reclaimed = 0
         for payload_path in self._cache_dir.rglob("*.bin"):
@@ -582,6 +647,7 @@ class DiskAdapter(BaseCacheAdapter, KeyValueInterface[str, Any]):
                 "storage_type": "sqlite_index+binary_files",
                 "cache_dir": str(self._cache_dir),
                 "sqlite_path": str(self._sqlite_path),
+                "max_size_bytes": self._config.max_size_bytes,
                 "renew_on_hit": self._config.renew_on_hit,
                 "cleanup_interval_sec": self._config.cleanup_interval_sec,
                 "pending_flush_count": pending_flush_count,
