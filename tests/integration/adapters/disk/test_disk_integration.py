@@ -1,5 +1,6 @@
 """Integration tests for the disk adapter with real filesystem persistence."""
 
+import multiprocessing
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -135,3 +136,81 @@ def test_concurrent_mixed_workload_stability(disk_integration_adapter):
                 assert adapter.get(key) is None
             else:
                 assert adapter.get(key) == {"worker": worker_id, "index": index}
+
+
+def _disk_mp_writer_worker(cache_dir: str, worker_id: int, start: int, count: int) -> int:
+    """Write a deterministic key range from a dedicated process."""
+    config = DiskAdapterConfig(
+        name=f"disk_mp_writer_{worker_id}",
+        cache_dir=cache_dir,
+        cleanup_interval_sec=60.0,
+        batch_flush_interval_sec=0.05,
+        batch_flush_max_pending=64,
+        default_ttl=30.0,
+    )
+    adapter = DiskAdapter(config)
+    assert adapter.connect() is True
+    written = 0
+    try:
+        for offset in range(count):
+            key_index = start + offset
+            key = f"mp:key:{key_index}"
+            value = {"worker": worker_id, "index": key_index}
+            assert adapter.set(key, value) is True
+            written += 1
+        return written
+    finally:
+        adapter.disconnect()
+
+
+@pytest.mark.integration
+def test_multi_process_shared_cache_high_volume(tmp_path):
+    """Multiple processes should safely share one disk cache directory."""
+    cache_dir = str(tmp_path / "disk_mp_shared")
+    process_count = 4
+    per_process_writes = 400
+    total_keys = process_count * per_process_writes
+
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Pool(processes=process_count) as pool:
+        jobs = [
+            pool.apply_async(
+                _disk_mp_writer_worker,
+                (cache_dir, worker_id, worker_id * per_process_writes, per_process_writes),
+            )
+            for worker_id in range(process_count)
+        ]
+        written_counts = [job.get(timeout=120) for job in jobs]
+
+    assert sum(written_counts) == total_keys
+
+    verifier = DiskAdapter(
+        DiskAdapterConfig(
+            name="disk_mp_verifier",
+            cache_dir=cache_dir,
+            cleanup_interval_sec=60.0,
+            batch_flush_interval_sec=0.05,
+            batch_flush_max_pending=64,
+            default_ttl=30.0,
+        )
+    )
+    assert verifier.connect() is True
+    try:
+        assert verifier.health_check() is True
+        observed_size = verifier.size()
+        assert observed_size >= int(total_keys * 0.99)
+
+        found = 0
+        for key_index in range(total_keys):
+            key = f"mp:key:{key_index}"
+            value = verifier.get(key)
+            if value is None:
+                continue
+            assert value == {
+                "worker": key_index // per_process_writes,
+                "index": key_index,
+            }
+            found += 1
+        assert found >= int(total_keys * 0.99)
+    finally:
+        verifier.disconnect()

@@ -375,12 +375,34 @@ class SmartPoolAdapter(BasePoolAdapter, Generic[T]):
             return False
 
     def _do_health_check(self) -> bool:
-        """Perform the actual health check logic."""
+        """Perform the actual health check logic.
+
+        SmartPool exposes a 3-level status:
+        - ``healthy``: no issue
+        - ``warning``: one issue (often expected during cold start)
+        - ``critical``: multiple issues / real degradation
+
+        Only ``critical`` is treated as a failed health check.
+        """
         if not self._pool:
             return False
         try:
             health_status = self._pool.get_health_status()
-            return health_status.get("status") == "healthy"
+            status = health_status.get("status")
+            if status == "critical":
+                self._logger.warning(
+                    "SmartPool '%s' health critical: %s",
+                    self._config.name,
+                    health_status.get("issues", []),
+                )
+                return False
+            if status == "warning":
+                self._logger.debug(
+                    "SmartPool '%s' health warning (treated as healthy): %s",
+                    self._config.name,
+                    health_status.get("issues", []),
+                )
+            return True
         except Exception as e:  # pylint: disable=broad-exception-caught
             self._logger.error("SmartPool health check failed: %s", e)
             return False

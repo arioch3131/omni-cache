@@ -12,6 +12,7 @@ class DiskAdapterConfig(AdapterConfig):
 
     cache_dir: str = "omni_cache_disk"
     sqlite_path: str | None = None
+    max_size_bytes: int | None = None
     default_ttl: float | None = None
     renew_on_hit: bool = False
     renew_threshold: float = 0.2
@@ -27,6 +28,9 @@ class DiskAdapterConfig(AdapterConfig):
 
         if self.default_ttl is not None and self.default_ttl <= 0:
             raise ValueError("default_ttl must be > 0 when set")
+
+        if self.max_size_bytes is not None and self.max_size_bytes <= 0:
+            raise ValueError("max_size_bytes must be > 0 when set")
 
         if not (0 < self.renew_threshold <= 1):
             raise ValueError("renew_threshold must be in (0, 1]")

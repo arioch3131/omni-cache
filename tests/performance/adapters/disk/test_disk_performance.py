@@ -111,3 +111,50 @@ def test_hot_read_latency_distribution(performance_adapter):
 
     assert average_latency < 0.01
     assert p95_latency < 0.03
+
+
+@pytest.mark.integration
+def test_high_volume_dataset_retrieval_stability(performance_adapter):
+    """High key volume should remain retrievable with stable hit quality."""
+    adapter = performance_adapter
+    key_count = 5000
+
+    start_set = time.perf_counter()
+    for index in range(key_count):
+        assert adapter.set(f"perf:volume:{index}", {"payload": "x" * 128, "index": index}) is True
+    set_duration = time.perf_counter() - start_set
+
+    # Read only a large sample to keep runtime predictable while still stressing index lookups.
+    sample_count = 2000
+    start_get = time.perf_counter()
+    for index in range(sample_count):
+        key_index = (index * 7) % key_count
+        assert adapter.get(f"perf:volume:{key_index}") == {
+            "payload": "x" * 128,
+            "index": key_index,
+        }
+    get_duration = time.perf_counter() - start_get
+
+    assert adapter.size() == key_count
+    assert (key_count / set_duration) > 70
+    assert (sample_count / get_duration) > 130
+
+
+@pytest.mark.integration
+def test_cleanup_reconcile_cost_under_volume(performance_adapter):
+    """Cleanup on a large expired set should finish in bounded time."""
+    adapter = performance_adapter
+    entry_count = 2500
+
+    for index in range(entry_count):
+        assert adapter.set(f"perf:expire:{index}", {"idx": index}, ttl=0.15) is True
+
+    time.sleep(0.22)
+    start_cleanup = time.perf_counter()
+    removed_rows = adapter.cleanup()
+    cleanup_duration = time.perf_counter() - start_cleanup
+
+    # A small margin is accepted for rows already opportunistically cleaned.
+    assert removed_rows >= (entry_count - 128)
+    assert cleanup_duration < 8.0
+    assert adapter.size() == 0
