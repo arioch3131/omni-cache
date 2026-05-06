@@ -525,7 +525,9 @@ class DiskAdapter(BaseCacheAdapter, KeyValueInterface[str, Any]):
         if not rows_to_evict:
             return 0
 
-        conn.executemany("DELETE FROM cache_entries WHERE key = ?", [(row[0],) for row in rows_to_evict])
+        conn.executemany(
+            "DELETE FROM cache_entries WHERE key = ?", [(row[0],) for row in rows_to_evict]
+        )
         conn.commit()
 
         for _, relative_path in rows_to_evict:
